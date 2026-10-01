@@ -23,3 +23,4 @@ describe('Express Application Foundation', () => {
     expect(response.body.info.title).toBe('Usafi Backend API Documentation');
   });
 });
+

@@ -1,5 +1,3 @@
-// Prisma schema file for Usafi Backend Foundation
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,9 +7,802 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// System infrastructure model to initialize Prisma client & migrations foundation
-model InfrastructureHealth {
-  id        String   @id @default(uuid())
-  status    String   @default("healthy")
-  createdAt DateTime @default(now())
+/// Platform administrator account record [FIGMA + PROPOSAL]
+model AdminUser {
+  id                   String           @id @default(uuid()) @db.Uuid
+  email                String           @unique @db.VarChar(255)
+  passwordHash         String           @map("password_hash") @db.VarChar(255)
+  firstName            String           @map("first_name") @db.VarChar(100)
+  lastName             String           @map("last_name") @db.VarChar(100)
+  phone                String?          @db.VarChar(20)
+  status               AdminUserStatus  @default(ACTIVE)
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  roles                AdminUserRole[]
+  announcements        Announcement[]   @relation("AdminAnnouncements")
+  auditLogs            AuditLog[]       @relation("ActorAdminLogs")
+  sentChatMessages     ChatMessage[]    @relation("SentAdminChatMessages")
+  reviewedDocs         DocumentReview[] @relation("AdminDocumentReviews")
+  createdPolicies      PolicyDocument[] @relation("PolicyCreatedByAdmin")
+  createdShifts        Shift[]          @relation("ShiftCreatedByAdmin")
+  createdRecurringJobs RecurringJob[]   @relation("RecurringJobCreatedByAdmin")
+  reviewedRequests     StaffRequest[]   @relation("StaffRequestReviewedByAdmin")
+  updatedSettings      SystemSettings[] @relation("UpdatedByAdmin")
+  sentTicketMessages   TicketMessage[]  @relation("SentAdminTicketMessages")
+  sessions             UserSession[]
+
+  @@index([status])
+  @@map("admin_users")
+}
+
+/// Administrative role definition [PROPOSAL]
+model Role {
+  id          String           @id @default(uuid()) @db.Uuid
+  name        String           @unique @db.VarChar(50)
+  description String?
+  isSystem    Boolean          @default(false) @map("is_system")
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  adminUsers  AdminUserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+/// Granular admin permission definition [PROPOSAL]
+model Permission {
+  id          String           @id @default(uuid()) @db.Uuid
+  code        String           @unique @db.VarChar(100)
+  module      String           @db.VarChar(50)
+  description String?
+  roles       RolePermission[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+/// Junction table linking Permissions to Roles
+model RolePermission {
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  assignedAt   DateTime   @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+/// Junction table linking Admin Users to Roles
+model AdminUserRole {
+  adminUserId String    @map("admin_user_id") @db.Uuid
+  roleId      String    @map("role_id") @db.Uuid
+  assignedAt  DateTime  @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  role        Role      @relation(fields: [roleId], references: [id])
+
+  @@id([adminUserId, roleId])
+  @@map("admin_user_roles")
+}
+
+/// Unified authentication session and refresh token record
+model UserSession {
+  id               String     @id @default(uuid()) @db.Uuid
+  userType         UserType   @map("user_type")
+  adminUserId      String?    @map("admin_user_id") @db.Uuid
+  staffId          String?    @map("staff_id") @db.Uuid
+  refreshTokenHash String     @unique @map("refresh_token_hash") @db.VarChar(255)
+  deviceInfo       String?    @map("device_info")
+  ipAddress        String?    @map("ip_address") @db.VarChar(45)
+  expiresAt        DateTime   @map("expires_at") @db.Timestamptz(6)
+  revokedAt        DateTime?  @map("revoked_at") @db.Timestamptz(6)
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  adminUser        AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  staff            Staff?     @relation("StaffSessions", fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId])
+  @@index([staffId])
+  @@map("user_sessions")
+}
+
+/// Dynamic platform settings repository
+model SystemSettings {
+  key         String           @id @db.VarChar(100)
+  value       String
+  valueType   SettingValueType @default(STRING) @map("value_type")
+  description String?
+  updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedById String?          @map("updated_by_id") @db.Uuid
+  updatedBy   AdminUser?       @relation("UpdatedByAdmin", fields: [updatedById], references: [id])
+
+  @@map("system_settings")
+}
+
+/// Central worker identity and directory record [FIGMA + PROPOSAL]
+model Staff {
+  id                   String                @id @default(uuid()) @db.Uuid
+  workerCode           String                @unique @map("worker_code") @db.VarChar(20)
+  email                String                @unique @db.VarChar(255)
+  phone                String                @unique @db.VarChar(20)
+  passwordHash         String                @map("password_hash") @db.VarChar(255)
+  status               StaffStatus           @default(PENDING_ONBOARDING)
+  avatarUrl            String?               @map("avatar_url")
+  primaryRoleId        String?               @map("primary_role_id") @db.Uuid
+  pushToken            String?               @map("push_token")
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  attendanceRecords    AttendanceRecord[]
+  bankDetails          BankDetails?
+  receivedChatMessages ChatMessage[]         @relation("ReceivedStaffChatMessages")
+  sentChatMessages     ChatMessage[]         @relation("SentStaffChatMessages")
+  employmentReferences EmploymentReference[]
+  healthInformation    HealthInformation?
+  nextOfKin            NextOfKin?
+  notifications        Notification[]
+  personalDetails      PersonalDetails?
+  qualifications       Qualification[]
+  assignments          ShiftAssignment[]
+  primaryRole          JobRole?              @relation("StaffPrimaryRole", fields: [primaryRoleId], references: [id])
+  staffContract        StaffContract?
+  documents            StaffDocument[]
+  requests             StaffRequest[]
+  supportTickets       SupportTicket[]
+  sentTicketMessages   TicketMessage[]       @relation("SentStaffTicketMessages")
+  sessions             UserSession[]         @relation("StaffSessions")
+
+  @@index([status])
+  @@map("staff")
+}
+
+/// Personal identification information (Profile Tab 1) [FIGMA]
+model PersonalDetails {
+  id           String   @id @default(uuid()) @db.Uuid
+  staffId      String   @unique @map("staff_id") @db.Uuid
+  firstName    String   @map("first_name") @db.VarChar(100)
+  lastName     String   @map("last_name") @db.VarChar(100)
+  dateOfBirth  DateTime @map("date_of_birth") @db.Date
+  gender       Gender
+  nationality  String?  @db.VarChar(100)
+  niNumber     String?  @map("ni_number") @db.VarChar(20)
+  utrNumber    String?  @map("utr_number") @db.VarChar(20)
+  addressLine1 String   @map("address_line_1")
+  addressLine2 String?  @map("address_line_2")
+  city         String   @db.VarChar(100)
+  postcode     String   @db.VarChar(20)
+  country      String   @db.VarChar(100)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  staff        Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@map("personal_details")
+}
+
+/// Health and medical clearance details (Profile Tab 2) [FIGMA]
+model HealthInformation {
+  id                       String        @id @default(uuid()) @db.Uuid
+  staffId                  String        @unique @map("staff_id") @db.Uuid
+  fitnessStatus            FitnessStatus @map("fitness_status")
+  bloodGroup               String?       @map("blood_group") @db.VarChar(10)
+  emergencyContactName     String?       @map("emergency_contact_name") @db.VarChar(150)
+  emergencyContactPhone    String?       @map("emergency_contact_phone") @db.VarChar(20)
+  allergiesMedicalNotes    String?       @map("allergies_medical_notes")
+  disabilityAccommodations String?       @map("disability_accommodations")
+  updatedAt                DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  staff                    Staff         @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@map("health_information")
+}
+
+/// Worker bank details for payroll processing [FIGMA]
+model BankDetails {
+  id                     String                 @id @default(uuid()) @db.Uuid
+  staffId                String                 @unique @map("staff_id") @db.Uuid
+  accountHolderName      String                 @map("account_holder_name") @db.VarChar(150)
+  bankName               String                 @map("bank_name") @db.VarChar(100)
+  sortCodeEncrypted      String                 @map("sort_code_encrypted")
+  accountNumberEncrypted String                 @map("account_number_encrypted")
+  verificationStatus     BankVerificationStatus @default(PENDING) @map("verification_status")
+  updatedAt              DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  staff                  Staff                  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@map("bank_details")
+}
+
+/// Emergency contact information [FIGMA]
+model NextOfKin {
+  id           String   @id @default(uuid()) @db.Uuid
+  staffId      String   @unique @map("staff_id") @db.Uuid
+  fullName     String   @map("full_name") @db.VarChar(150)
+  relationship String   @db.VarChar(50)
+  phone        String   @db.VarChar(20)
+  email        String?  @db.VarChar(255)
+  address      String?
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  staff        Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@map("next_of_kin")
+}
+
+/// Qualifications, certificates, and work experience (Profile Tab 3) [FIGMA]
+model Qualification {
+  id                        String    @id @default(uuid()) @db.Uuid
+  staffId                   String    @map("staff_id") @db.Uuid
+  title                     String    @db.VarChar(150)
+  highestEducationLevel     String?   @map("highest_education_level") @db.VarChar(100)
+  yearsOfExperience         Int?      @map("years_of_experience")
+  specializedCertifications String?   @map("specialized_certifications")
+  issueDate                 DateTime? @map("issue_date") @db.Date
+  expiryDate                DateTime? @map("expiry_date") @db.Date
+  certificateDocumentUrl    String?   @map("certificate_document_url")
+  staff                     Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId])
+  @@map("qualifications")
+}
+
+/// Previous employment references (Profile Tab 4) [FIGMA]
+model EmploymentReference {
+  id                 String                      @id @default(uuid()) @db.Uuid
+  staffId            String                      @map("staff_id") @db.Uuid
+  companyName        String                      @map("company_name") @db.VarChar(150)
+  supervisorName     String                      @map("supervisor_name") @db.VarChar(150)
+  supervisorPhone    String                      @map("supervisor_phone") @db.VarChar(20)
+  supervisorEmail    String?                     @map("supervisor_email") @db.VarChar(255)
+  jobTitle           String?                     @map("job_title") @db.VarChar(100)
+  verificationStatus ReferenceVerificationStatus @default(PENDING) @map("verification_status")
+  staff              Staff                       @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId])
+  @@map("employment_references")
+}
+
+/// Signed worker employment terms agreement (Profile Tab 6) [FIGMA]
+model StaffContract {
+  id                String    @id @default(uuid()) @db.Uuid
+  staffId           String    @unique @map("staff_id") @db.Uuid
+  contractVersion   String    @map("contract_version") @db.VarChar(50)
+  signedDigitally   Boolean   @default(false) @map("signed_digitally")
+  signedAt          DateTime? @map("signed_at") @db.Timestamptz(6)
+  signatureSvgOrUrl String?   @map("signature_svg_or_url")
+  pdfCopyUrl        String?   @map("pdf_copy_url")
+  staff             Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@map("staff_contracts")
+}
+
+/// System catalog of required proof documents uploaded by staff [FIGMA + PROPOSAL]
+model DocumentType {
+  id          String          @id @default(uuid()) @db.Uuid
+  code        String          @unique @db.VarChar(50)
+  name        String          @db.VarChar(100)
+  isMandatory Boolean         @default(true) @map("is_mandatory")
+  documents   StaffDocument[]
+
+  @@map("document_types")
+}
+
+/// Uploaded compliance document files submitted by staff for admin verification [FIGMA + PROPOSAL]
+model StaffDocument {
+  id             String           @id @default(uuid()) @db.Uuid
+  staffId        String           @map("staff_id") @db.Uuid
+  documentTypeId String           @map("document_type_id") @db.Uuid
+  fileUrl        String           @map("file_url")
+  fileName       String           @map("file_name") @db.VarChar(255)
+  status         DocumentStatus   @default(PENDING)
+  expiryDate     DateTime?        @map("expiry_date") @db.Date
+  uploadedAt     DateTime         @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+  reviews        DocumentReview[]
+  documentType   DocumentType     @relation(fields: [documentTypeId], references: [id])
+  staff          Staff            @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId])
+  @@index([documentTypeId])
+  @@index([status])
+  @@map("staff_documents")
+}
+
+/// Audit record of document approval/rejection by admin compliance officers [FIGMA + PROPOSAL]
+model DocumentReview {
+  id              String        @id @default(uuid()) @db.Uuid
+  staffDocumentId String        @map("staff_document_id") @db.Uuid
+  reviewerId      String        @map("reviewer_id") @db.Uuid
+  action          ReviewAction
+  rejectionReason String?       @map("rejection_reason")
+  reviewedAt      DateTime      @default(now()) @map("reviewed_at") @db.Timestamptz(6)
+  reviewer        AdminUser     @relation("AdminDocumentReviews", fields: [reviewerId], references: [id])
+  staffDocument   StaffDocument @relation(fields: [staffDocumentId], references: [id], onDelete: Cascade)
+
+  @@index([staffDocumentId])
+  @@index([reviewerId])
+  @@map("document_reviews")
+}
+
+/// Company policies, safety handbooks, and regulatory guidelines published by Admin [PROPOSAL]
+model PolicyDocument {
+  id                         String     @id @default(uuid()) @db.Uuid
+  title                      String     @db.VarChar(200)
+  category                   String     @db.VarChar(100)
+  fileUrl                    String     @map("file_url")
+  version                    String     @default("1.0") @db.VarChar(50)
+  isMandatoryAcknowledgement Boolean    @default(false) @map("is_mandatory_acknowledgement")
+  publishedAt                DateTime   @default(now()) @map("published_at") @db.Timestamptz(6)
+  createdById                String?    @map("created_by_id") @db.Uuid
+  createdBy                  AdminUser? @relation("PolicyCreatedByAdmin", fields: [createdById], references: [id])
+
+  @@index([category])
+  @@map("policy_documents")
+}
+
+/// Physical work site details and geofence coordinates [FIGMA + PROPOSAL]
+model Location {
+  id                   String         @id @default(uuid()) @db.Uuid
+  name                 String         @db.VarChar(150)
+  addressLine          String         @map("address_line")
+  city                 String         @db.VarChar(100)
+  postcode             String         @db.VarChar(20)
+  latitude             Decimal        @db.Decimal(10, 7)
+  longitude            Decimal        @db.Decimal(10, 7)
+  geofenceRadiusMeters Int            @map("geofence_radius_meters")
+  shifts               Shift[]
+  recurringJobs        RecurringJob[]
+
+  @@map("locations")
+}
+
+/// Worker role taxonomy [FIGMA]
+model JobRole {
+  id            String         @id @default(uuid()) @db.Uuid
+  title         String         @unique @db.VarChar(100)
+  description   String?
+  shifts        Shift[]
+  recurringJobs RecurringJob[]
+  staff         Staff[]        @relation("StaffPrimaryRole")
+
+  @@map("job_roles")
+}
+
+/// Master template and schedule rule for recurring job instances
+model RecurringJob {
+  id                   String              @id @default(uuid()) @db.Uuid
+  recurringJobCode     String              @unique @map("recurring_job_code") @db.VarChar(20)
+  title                String              @db.VarChar(150)
+  jobRoleId            String              @map("job_role_id") @db.Uuid
+  locationId           String              @map("location_id") @db.Uuid
+  timezone             String?             @db.VarChar(50)
+  startTimeOfDay       String              @map("start_time_of_day") @db.VarChar(5)
+  endTimeOfDay         String              @map("end_time_of_day") @db.VarChar(5)
+  breakDurationMinutes Int                 @map("break_duration_minutes")
+  payRateHourly        Decimal             @map("pay_rate_hourly") @db.Decimal(10, 2)
+  currency             String              @db.VarChar(3)
+  requiredWorkers      Int                 @map("required_workers")
+  description          String?
+  requirements         String?
+  adminNotes           String?             @map("admin_notes")
+  status               RecurringJobStatus  @default(DRAFT)
+  recurrenceFrequency  RecurrenceFrequency @map("recurrence_frequency")
+  interval             Int                 @default(1)
+  byWeekdays           Int[]               @map("by_weekdays")
+  byMonthDay           Int?                @map("by_month_day")
+  startDate            DateTime            @map("start_date") @db.Date
+  endDate              DateTime?           @map("end_date") @db.Date
+  lastGeneratedUntil   DateTime?           @map("last_generated_until") @db.Date
+  createdById          String?             @map("created_by_id") @db.Uuid
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy            AdminUser?          @relation("RecurringJobCreatedByAdmin", fields: [createdById], references: [id])
+  jobRole              JobRole             @relation(fields: [jobRoleId], references: [id])
+  location             Location            @relation(fields: [locationId], references: [id])
+  shifts               Shift[]
+
+  @@index([status])
+  @@index([locationId])
+  @@index([jobRoleId])
+  @@index([startDate, endDate])
+  @@map("recurring_jobs")
+}
+
+/// Single scheduled work opportunity instance [FIGMA + PROPOSAL]
+model Shift {
+  id                   String             @id @default(uuid()) @db.Uuid
+  shiftCode            String             @unique @map("shift_code") @db.VarChar(20)
+  title                String             @db.VarChar(150)
+  jobRoleId            String             @map("job_role_id") @db.Uuid
+  locationId           String             @map("location_id") @db.Uuid
+  shiftDate            DateTime           @map("shift_date") @db.Date
+  startTime            DateTime           @map("start_time") @db.Timestamptz(6)
+  endTime              DateTime           @map("end_time") @db.Timestamptz(6)
+  breakDurationMinutes Int                @map("break_duration_minutes")
+  payRateHourly        Decimal            @map("pay_rate_hourly") @db.Decimal(10, 2)
+  currency             String             @db.VarChar(3)
+  requiredWorkers      Int                @map("required_workers")
+  description          String?
+  requirements         String?
+  adminNotes           String?            @map("admin_notes")
+  status               ShiftStatus        @default(PUBLISHED)
+  recurringJobId       String?            @map("recurring_job_id") @db.Uuid
+  occurrenceDate       DateTime?          @map("occurrence_date") @db.Date
+  isOccurrenceOverride Boolean            @default(false) @map("is_occurrence_override")
+  createdById          String?            @map("created_by_id") @db.Uuid
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  attendanceRecords    AttendanceRecord[]
+  chatMessages         ChatMessage[]
+  assignments          ShiftAssignment[]
+  createdBy            AdminUser?         @relation("ShiftCreatedByAdmin", fields: [createdById], references: [id])
+  jobRole              JobRole            @relation(fields: [jobRoleId], references: [id])
+  location             Location           @relation(fields: [locationId], references: [id])
+  recurringJob         RecurringJob?      @relation(fields: [recurringJobId], references: [id], onDelete: SetNull)
+  requests             StaffRequest[]
+
+  @@unique([recurringJobId, occurrenceDate])
+  @@index([recurringJobId])
+  @@index([shiftDate])
+  @@index([status])
+  @@index([jobRoleId])
+  @@index([locationId])
+  @@map("shifts")
+}
+
+/// Worker application for a published shift opportunity [FIGMA]
+model StaffRequest {
+  id              String             @id @default(uuid()) @db.Uuid
+  shiftId         String             @map("shift_id") @db.Uuid
+  staffId         String             @map("staff_id") @db.Uuid
+  status          StaffRequestStatus @default(PENDING)
+  appliedAt       DateTime           @default(now()) @map("applied_at") @db.Timestamptz(6)
+  reviewedById    String?            @map("reviewed_by_id") @db.Uuid
+  reviewedAt      DateTime?          @map("reviewed_at") @db.Timestamptz(6)
+  rejectionReason String?            @map("rejection_reason")
+  reviewedBy      AdminUser?         @relation("StaffRequestReviewedByAdmin", fields: [reviewedById], references: [id])
+  shift           Shift              @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  staff           Staff              @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([shiftId, staffId])
+  @@index([shiftId])
+  @@index([staffId])
+  @@index([status])
+  @@map("staff_requests")
+}
+
+/// Confirmed linkage of a worker to a shift [FIGMA + PROPOSAL]
+model ShiftAssignment {
+  id               String                @id @default(uuid()) @db.Uuid
+  shiftId          String                @map("shift_id") @db.Uuid
+  staffId          String                @map("staff_id") @db.Uuid
+  status           ShiftAssignmentStatus @default(CONFIRMED)
+  assignedAt       DateTime              @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  attendanceRecord AttendanceRecord?
+  shift            Shift                 @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  staff            Staff                 @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([shiftId, staffId])
+  @@index([shiftId])
+  @@index([staffId])
+  @@index([status])
+  @@map("shift_assignments")
+}
+
+/// Top-level attendance container for a worker shift execution [FIGMA + PROPOSAL]
+model AttendanceRecord {
+  id                 String            @id @default(uuid()) @db.Uuid
+  shiftAssignmentId  String            @unique @map("shift_assignment_id") @db.Uuid
+  shiftId            String            @map("shift_id") @db.Uuid
+  staffId            String            @map("staff_id") @db.Uuid
+  currentState       AttendanceState   @default(NOT_STARTED) @map("current_state")
+  scheduledStartTime DateTime          @map("scheduled_start_time") @db.Timestamptz(6)
+  scheduledEndTime   DateTime          @map("scheduled_end_time") @db.Timestamptz(6)
+  actualStartTime    DateTime?         @map("actual_start_time") @db.Timestamptz(6)
+  actualEndTime      DateTime?         @map("actual_end_time") @db.Timestamptz(6)
+  gpsVerified        Boolean           @default(false) @map("gps_verified")
+  status             AttendanceStatus  @default(PENDING)
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  events             AttendanceEvent[]
+  shiftAssignment    ShiftAssignment   @relation(fields: [shiftAssignmentId], references: [id])
+  shift              Shift             @relation(fields: [shiftId], references: [id])
+  staff              Staff             @relation(fields: [staffId], references: [id])
+  breaks             BreakRecord[]
+
+  @@index([shiftId])
+  @@index([staffId])
+  @@index([status])
+  @@index([currentState])
+  @@map("attendance_records")
+}
+
+/// Detailed event history for attendance and GPS activity [FIGMA + PROPOSAL]
+model AttendanceEvent {
+  id                   String              @id @default(uuid()) @db.Uuid
+  attendanceRecordId   String              @map("attendance_record_id") @db.Uuid
+  eventType            AttendanceEventType @map("event_type")
+  recordedAt           DateTime            @map("recorded_at") @db.Timestamptz(6)
+  latitude             Decimal             @db.Decimal(10, 7)
+  longitude            Decimal             @db.Decimal(10, 7)
+  gpsAccuracy          Float               @map("gps_accuracy")
+  distanceFromLocation Float               @map("distance_from_location")
+  geofencePassed       Boolean             @map("geofence_passed")
+  isMockLocation       Boolean             @default(false) @map("is_mock_location")
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  attendanceRecord     AttendanceRecord    @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+
+  @@index([attendanceRecordId])
+  @@index([recordedAt])
+  @@map("attendance_events")
+}
+
+/// Breakdown of individual break periods during a shift [FIGMA]
+model BreakRecord {
+  id                 String           @id @default(uuid()) @db.Uuid
+  attendanceRecordId String           @map("attendance_record_id") @db.Uuid
+  startedAt          DateTime         @map("started_at") @db.Timestamptz(6)
+  endedAt            DateTime?        @map("ended_at") @db.Timestamptz(6)
+  durationMinutes    Int?             @map("duration_minutes")
+  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+
+  @@index([attendanceRecordId])
+  @@map("break_records")
+}
+
+/// In-app and push notification alert delivered to a staff user [FIGMA + PROPOSAL]
+model Notification {
+  id               String           @id @default(uuid()) @db.Uuid
+  recipientStaffId String           @map("staff_id") @db.Uuid
+  title            String           @db.VarChar(200)
+  message          String
+  notificationType NotificationType @map("notification_type")
+  isRead           Boolean          @default(false) @map("is_read")
+  readAt           DateTime?        @map("read_at") @db.Timestamptz(6)
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  recipientStaff   Staff            @relation(fields: [recipientStaffId], references: [id], onDelete: Cascade)
+
+  @@index([recipientStaffId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+/// Organization news feed broadcast to workers [FIGMA]
+model Announcement {
+  id          String    @id @default(uuid()) @db.Uuid
+  authorId    String    @map("author_id") @db.Uuid
+  title       String    @db.VarChar(200)
+  content     String
+  publishedAt DateTime  @default(now()) @map("published_at") @db.Timestamptz(6)
+  author      AdminUser @relation("AdminAnnouncements", fields: [authorId], references: [id])
+
+  @@index([authorId])
+  @@index([publishedAt])
+  @@map("announcements")
+}
+
+/// Direct shift-level communication and worker-to-coordinator messaging [FIGMA]
+model ChatMessage {
+  id               String     @id @default(uuid()) @db.Uuid
+  shiftId          String?    @map("shift_id") @db.Uuid
+  senderType       SenderType @map("sender_type")
+  senderStaffId    String?    @map("sender_staff_id") @db.Uuid
+  senderAdminId    String?    @map("sender_admin_id") @db.Uuid
+  recipientStaffId String?    @map("recipient_staff_id") @db.Uuid
+  messageText      String     @map("message_text")
+  sentAt           DateTime   @default(now()) @map("sent_at") @db.Timestamptz(6)
+  recipientStaff   Staff?     @relation("ReceivedStaffChatMessages", fields: [recipientStaffId], references: [id])
+  senderAdmin      AdminUser? @relation("SentAdminChatMessages", fields: [senderAdminId], references: [id])
+  senderStaff      Staff?     @relation("SentStaffChatMessages", fields: [senderStaffId], references: [id])
+  shift            Shift?     @relation(fields: [shiftId], references: [id])
+
+  @@index([shiftId])
+  @@index([senderStaffId])
+  @@index([senderAdminId])
+  @@index([recipientStaffId])
+  @@index([sentAt])
+  @@map("chat_messages")
+}
+
+/// Categorized helpdesk support query created by a worker [FIGMA + PROPOSAL]
+model SupportTicket {
+  id         String          @id @default(uuid()) @db.Uuid
+  ticketCode String          @unique @map("ticket_code") @db.VarChar(20)
+  staffId    String          @map("staff_id") @db.Uuid
+  subject    String          @db.VarChar(200)
+  category   TicketCategory
+  status     TicketStatus    @default(OPEN)
+  createdAt  DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  staff      Staff           @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  messages   TicketMessage[]
+
+  @@index([staffId])
+  @@index([status])
+  @@index([category])
+  @@map("support_tickets")
+}
+
+/// Message thread belonging to a SupportTicket [FIGMA + PROPOSAL]
+model TicketMessage {
+  id            String        @id @default(uuid()) @db.Uuid
+  ticketId      String        @map("ticket_id") @db.Uuid
+  senderType    SenderType    @map("sender_type")
+  senderStaffId String?       @map("sender_staff_id") @db.Uuid
+  senderAdminId String?       @map("sender_admin_id") @db.Uuid
+  messageText   String        @map("message_text")
+  sentAt        DateTime      @default(now()) @map("sent_at") @db.Timestamptz(6)
+  senderAdmin   AdminUser?    @relation("SentAdminTicketMessages", fields: [senderAdminId], references: [id])
+  senderStaff   Staff?        @relation("SentStaffTicketMessages", fields: [senderStaffId], references: [id])
+  ticket        SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([senderStaffId])
+  @@index([senderAdminId])
+  @@map("ticket_messages")
+}
+
+/// Immutable administrative audit trail [PROPOSAL]
+model AuditLog {
+  id           String     @id @default(uuid()) @db.Uuid
+  actorAdminId String?    @map("actor_admin_id") @db.Uuid
+  action       String     @db.VarChar(100)
+  entityType   String     @map("entity_type") @db.VarChar(50)
+  entityId     String     @map("entity_id") @db.Uuid
+  oldValues    Json?      @map("old_values")
+  newValues    Json?      @map("new_values")
+  ipAddress    String?    @map("ip_address") @db.VarChar(45)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  actorAdmin   AdminUser? @relation("ActorAdminLogs", fields: [actorAdminId], references: [id])
+
+  @@index([actorAdminId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+enum AdminUserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserType {
+  ADMIN
+  STAFF
+}
+
+enum SettingValueType {
+  STRING
+  NUMBER
+  BOOLEAN
+  JSON
+}
+
+enum StaffStatus {
+  PENDING_ONBOARDING
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum FitnessStatus {
+  FIT_FOR_WORK
+  PENDING_ASSESSMENT
+  RESTRICTED_DUTY
+}
+
+enum BankVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum ReferenceVerificationStatus {
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+enum DocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum ReviewAction {
+  APPROVED
+  REJECTED
+}
+
+enum ShiftStatus {
+  DRAFT
+  PUBLISHED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum StaffRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum ShiftAssignmentStatus {
+  CONFIRMED
+  CANCELLED
+  NO_SHOW
+  COMPLETED
+}
+
+enum AttendanceState {
+  NOT_STARTED
+  ON_THE_WAY
+  REACHED_LOCATION
+  JOB_STARTED
+  ON_BREAK
+  JOB_ENDED
+  COMPLETED
+}
+
+enum AttendanceStatus {
+  PENDING
+  PRESENT
+  LATE
+  EARLY_DEPARTURE
+  ABSENT
+  FLAGGED
+}
+
+enum AttendanceEventType {
+  START_JOURNEY
+  ON_THE_WAY
+  REACHED_LOCATION
+  START_JOB
+  START_BREAK
+  END_BREAK
+  END_JOB
+  JOB_COMPLETED
+}
+
+enum NotificationType {
+  SHIFT_INVITE
+  APPLICATION_APPROVED
+  APPLICATION_REJECTED
+  SHIFT_REMINDER
+  ANNOUNCEMENT
+  SUPPORT_REPLY
+}
+
+enum SenderType {
+  STAFF
+  ADMIN
+}
+
+enum TicketCategory {
+  PAYROLL
+  SHIFT_ISSUE
+  COMPLIANCE
+  APP_BUG
+  OTHER
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum RecurringJobStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum RecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
 }

@@ -25,7 +25,7 @@ export class ApiError extends Error {
 
   static validationError(message: string, details?: Record<string, unknown> | unknown[]): ApiError {
     return new ApiError(400, message, ErrorCodes.VALIDATION_ERROR, details);
-  }
+  } 
 
   static unauthorized(message = 'Authentication required'): ApiError {
     return new ApiError(401, message, ErrorCodes.AUTHENTICATION_ERROR);

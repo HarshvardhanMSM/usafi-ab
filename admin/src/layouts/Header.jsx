@@ -134,7 +134,7 @@ export const Header = ({ onOpenMobile }) => {
               setProfileOpen(!profileOpen);
               setNotificationOpen(false);
             }}
-            className="flex items-center gap-3 p-1.5 rounded-xl hover:bg-slate-100 transition"
+            className="flex items-center gap-3 p-1.5 bg-slate-200 rounded-xl hover:bg-slate-300 transition"
           >
             <Avatar name={user?.name || 'Super Admin'} size="sm" />
             <div className="hidden md:block text-left">

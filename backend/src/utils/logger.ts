@@ -25,7 +25,7 @@ class AppLogger implements ILogger {
   }
 
   info(message: string, meta?: Record<string, unknown>): void {
-    console.info(this.formatMessage('info', message, meta));
+    console.info(this.formatMessage('info', message, meta))
   }
 
   warn(message: string, meta?: Record<string, unknown>): void {

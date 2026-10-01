@@ -19,7 +19,11 @@ export interface ApiErrorResponse {
 
 export interface AuthUserPayload {
   userId: string;
-  role?: string;
-  email?: string;
+  userType: 'ADMIN' | 'STAFF';
+  email: string;
+  sessionId: string;
+  roles?: string[];
+  permissions?: string[];
   [key: string]: unknown;
 }
+

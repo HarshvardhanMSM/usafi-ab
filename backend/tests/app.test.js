@@ -20,7 +20,7 @@ describe('Express Application Foundation', () => {
     it('should return OpenAPI json spec at /api/docs.json', async () => {
         const response = await (0, supertest_1.default)(app_1.app).get('/api/docs.json');
         expect(response.status).toBe(200);
-        expect(response.body).toHaveProperty('openapi');
+        expect(response.body).toHaveProperty('openapi'); 
         expect(response.body.info.title).toBe('Usafi Backend API Documentation');
     });
 });
